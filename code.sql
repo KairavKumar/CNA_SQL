@@ -148,142 +148,87 @@ WHERE (Store_ID, Product_ID, Date) IN (
 GROUP BY Region, Category
 ORDER BY Region, Total_Stock DESC;
 
-
--- Calculate reorder points and identify low stock items
--- Step 1: Get the latest date per Store + Product
+-- Calculate reorder points with adjusted time scale -------------------------------------------------------------------------------------------------
+-- Assuming Units_Sold represents weekly sales as otherwise very non uniform answers are coming
 WITH LatestDatePerProduct AS (
     SELECT Store_ID, Product_ID, MAX(Date) AS LatestDate
     FROM inventory_facts
     GROUP BY Store_ID, Product_ID
 ),
--- Step 2: Get daily sales and current stock for latest date only
 LatestProductSales AS (
     SELECT 
-        f.Store_ID,
-        f.Product_ID,
-        f.Category,
+        f.Store_ID, 
+        f.Product_ID, 
+        f.Category, 
         f.Region,
-        f.Units_Sold,
-        f.Inventory_Level,
-        f.Price
+        f.Units_Sold, 
+        f.Inventory_Level, 
+        f.Price,
+        f.Seasonality
     FROM inventory_facts f
     JOIN LatestDatePerProduct l
       ON f.Store_ID = l.Store_ID 
      AND f.Product_ID = l.Product_ID 
      AND f.Date = l.LatestDate
 ),
-
--- Step 3: Calculate average sales and reorder point
 ProductSalesSummary AS (
     SELECT 
-        f.Store_ID,
-        f.Product_ID,
-        f.Category,
+        f.Store_ID, 
+        f.Product_ID, 
+        f.Category, 
         f.Region,
-        ROUND(AVG(f.Units_Sold), 2) AS Avg_Daily_Sales,
-        ROUND(STDDEV(f.Units_Sold), 2) AS StdDev_Sales,
+        ROUND(AVG(f.Units_Sold)/7, 2) AS Avg_Daily_Sales, 
+        ROUND(STDDEV(f.Units_Sold)/7, 2) AS StdDev_Sales,
         MAX(l.Inventory_Level) AS Current_Stock,
-        MAX(l.Price) AS Unit_Price
+        MAX(l.Price) AS Unit_Price,
+        MAX(l.Seasonality) AS Current_Season
     FROM inventory_facts f
     JOIN LatestProductSales l
       ON f.Store_ID = l.Store_ID 
      AND f.Product_ID = l.Product_ID
     GROUP BY f.Store_ID, f.Product_ID, f.Category, f.Region
-)
-
--- Step 4: Final output
-SELECT 
-    Store_ID,
-    Product_ID,
-    Category,
-    Region,
-    Current_Stock,
-    Avg_Daily_Sales,
-    ROUND((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) AS Reorder_Point,
-    CASE 
-        WHEN Current_Stock <= 0 THEN 'Out of Stock'
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) THEN 'Below Reorder Point'
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) * 1.2 THEN 'Near Reorder Point'
-        ELSE 'Adequate Stock'
-    END AS Stock_Status,
-    ROUND(Current_Stock / NULLIF(Avg_Daily_Sales, 0), 1) AS Days_Of_Supply
-FROM ProductSalesSummary
-ORDER BY 
-    CASE 
-        WHEN Current_Stock <= 0 THEN 1
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) THEN 2
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) * 1.2 THEN 3
-        ELSE 4
-    END,
-    Days_Of_Supply;
-
-
--- Calculate reorder points and identify low stock items
--- Step 1: Get the latest date per Store + Product
-WITH LatestDatePerProduct AS (
-    SELECT Store_ID, Product_ID, MAX(Date) AS LatestDate
+),
+SeasonalFactors AS (
+    SELECT 
+        Product_ID,
+        Seasonality,
+        AVG(Units_Sold) / (
+            SELECT AVG(Units_Sold) 
+            FROM inventory_facts i2 
+            WHERE i2.Product_ID = inventory_facts.Product_ID
+        ) AS Seasonal_Factor
     FROM inventory_facts
-    GROUP BY Store_ID, Product_ID
-),
-
--- Step 2: Get daily sales and current stock for the latest date only
-LatestProductSales AS (
-    SELECT 
-        f.Store_ID,
-        f.Product_ID,
-        f.Category,
-        f.Region,
-        f.Units_Sold,
-        f.Inventory_Level,
-        f.Price
-    FROM inventory_facts f
-    JOIN LatestDatePerProduct l
-      ON f.Store_ID = l.Store_ID 
-     AND f.Product_ID = l.Product_ID 
-     AND f.Date = l.LatestDate
-),
-
--- Step 3: Calculate average sales and reorder point (considering all sales history)
-ProductSalesSummary AS (
-    SELECT 
-        f.Store_ID,
-        f.Product_ID,
-        f.Category,
-        f.Region,
-        ROUND(AVG(f.Units_Sold), 2) AS Avg_Daily_Sales,
-        ROUND(STDDEV(f.Units_Sold), 2) AS StdDev_Sales,
-        MAX(l.Inventory_Level) AS Current_Stock,
-        MAX(l.Price) AS Unit_Price
-    FROM inventory_facts f
-    JOIN LatestProductSales l
-      ON f.Store_ID = l.Store_ID 
-     AND f.Product_ID = l.Product_ID
-    GROUP BY f.Store_ID, f.Product_ID, f.Category, f.Region
+    GROUP BY Product_ID, Seasonality
 )
-
--- Step 4: Final output
 SELECT 
-    Store_ID,
-    Product_ID,
-    Category,
-    Region,
-    Current_Stock,
-    Avg_Daily_Sales,
-    ROUND((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) AS Reorder_Point,
+    p.Store_ID,
+    p.Product_ID,
+    p.Category,
+    p.Region,
+    p.Current_Stock,
+    p.Avg_Daily_Sales,
+    ROUND((7 * p.Avg_Daily_Sales) + (1.5 * p.StdDev_Sales)) AS Standard_Reorder_Point,
+    ROUND(((7 * p.Avg_Daily_Sales) + (1.5 * p.StdDev_Sales)) * 
+          COALESCE(s.Seasonal_Factor, 1)) AS Seasonal_Reorder_Point,
     CASE 
-        WHEN Current_Stock <= 0 THEN 'Out of Stock'
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) THEN 'Below Reorder Point'
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) * 1.2 THEN 'Near Reorder Point'
+        WHEN p.Current_Stock <= 0 THEN 'Out of Stock'
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * p.StdDev_Sales)) * COALESCE(s.Seasonal_Factor, 1)) 
+            THEN 'Below Seasonal Reorder Point'
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * p.StdDev_Sales)) * COALESCE(s.Seasonal_Factor, 1)) * 1.2 
+            THEN 'Near Seasonal Reorder Point'
         ELSE 'Adequate Stock'
     END AS Stock_Status,
-    ROUND(Current_Stock / NULLIF(Avg_Daily_Sales, 0), 1) AS Days_Of_Supply
-FROM ProductSalesSummary
+    ROUND(p.Current_Stock / NULLIF(p.Avg_Daily_Sales * COALESCE(s.Seasonal_Factor, 1), 0), 1) AS Days_Of_Supply
+FROM ProductSalesSummary p
+LEFT JOIN SeasonalFactors s ON p.Product_ID = s.Product_ID AND p.Current_Season = s.Seasonality
 ORDER BY 
     CASE 
-        WHEN Current_Stock <= 0 THEN 1
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) THEN 2
-        WHEN Current_Stock < ((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales)) * 1.2 THEN 3
+        WHEN p.Current_Stock <= 0 THEN 1
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * p.StdDev_Sales)) * COALESCE(s.Seasonal_Factor, 1)) THEN 2
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * p.StdDev_Sales)) * COALESCE(s.Seasonal_Factor, 1)) * 1.2 THEN 3
         ELSE 4
     END,
     Days_Of_Supply;
--- Literally every single thing is apparently below reorder point i have tried working with different queries someone look at this
+
+
+---------------------------------------------------------------------------------------------------------------
