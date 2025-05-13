@@ -232,3 +232,29 @@ ORDER BY
 
 
 ---------------------------------------------------------------------------------------------------------------
+-- inventory turnover ratio
+-- This query calculates the inventory turnover ratio for each product in each store\
+-- units based turn over ratio as cogs cannot be calculated
+SELECT 
+    DATE_FORMAT(Date, '%Y-%m') AS YearMonth,
+    Store_ID,
+    Product_ID,
+    SUM(Units_Sold) AS Total_Units_Sold,
+    AVG(Inventory_Level) AS Avg_Inventory_Level,
+    ROUND(SUM(Units_Sold) / NULLIF(AVG(Inventory_Level), 0), 2) AS Inventory_Turnover_Ratio
+FROM inventory_facts
+GROUP BY YearMonth, Store_ID, Product_ID
+ORDER BY YearMonth, Store_ID, Product_ID;
+
+
+
+--  Stockout Risk Analysis (Days with Low or Zero Inventory)
+SELECT 
+    Store_ID,
+    Product_ID,
+    COUNT(*) AS Low_Inventory_Days,
+    ROUND(COUNT(*) / COUNT(DISTINCT Date), 2) AS Risk_Ratio
+FROM inventory_facts
+WHERE Inventory_Level <= 10
+GROUP BY Store_ID, Product_ID
+ORDER BY Low_Inventory_Days DESC;
