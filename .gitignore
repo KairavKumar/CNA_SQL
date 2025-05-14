@@ -7,5 +7,5 @@
 Thumbs.db
 .env
 .env.local
-.vscode
+.vscode/
 
