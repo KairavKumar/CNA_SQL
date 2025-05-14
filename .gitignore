@@ -8,4 +8,4 @@ Thumbs.db
 .env
 .env.local
 .vscode/
-
+*.csv

@@ -249,12 +249,50 @@ ORDER BY YearMonth, Store_ID, Product_ID;
 
 
 --  Stockout Risk Analysis (Days with Low or Zero Inventory)
+WITH ProductStats AS (
+    SELECT 
+        Store_ID,
+        Product_ID,
+        ROUND(AVG(Units_Sold) / 7, 2) AS Avg_Daily_Sales,
+        ROUND(STDDEV(Units_Sold) / 7, 2) AS StdDev_Sales
+    FROM inventory_facts
+    GROUP BY Store_ID, Product_ID
+),
+ReorderPoints AS (
+    SELECT 
+        Store_ID,
+        Product_ID,
+        ROUND((7 * Avg_Daily_Sales) + (1.5 * StdDev_Sales), 2) AS Reorder_Point
+    FROM ProductStats
+),
+LabeledData AS (
+    SELECT 
+        f.Store_ID,
+        f.Product_ID,
+        f.Date,
+        f.Inventory_Level,
+        rp.Reorder_Point,
+        CASE 
+            WHEN f.Inventory_Level <= rp.Reorder_Point THEN 1
+            ELSE 0
+        END AS Is_Low
+    FROM inventory_facts f
+    JOIN ReorderPoints rp 
+      ON f.Store_ID = rp.Store_ID AND f.Product_ID = rp.Product_ID
+)
 SELECT 
     Store_ID,
     Product_ID,
-    COUNT(*) AS Low_Inventory_Days,
-    ROUND(COUNT(*) / COUNT(DISTINCT Date), 2) AS Risk_Ratio
-FROM inventory_facts
-WHERE Inventory_Level <= 10
+    SUM(Is_Low) AS Low_Inventory_Days,
+    COUNT(*) AS Total_Days,
+    ROUND(SUM(Is_Low) / COUNT(*), 2) AS Risk_Ratio,
+    CASE 
+        WHEN ROUND(SUM(Is_Low) / COUNT(*), 2) >= 0.75 THEN 'High Risk'
+        WHEN ROUND(SUM(Is_Low) / COUNT(*), 2) >= 0.4 THEN 'Moderate Risk'
+        WHEN ROUND(SUM(Is_Low) / COUNT(*), 2) >= 0.2 THEN 'Low Risk'
+        ELSE 'Safe'
+    END AS Risk_Flag
+FROM LabeledData
 GROUP BY Store_ID, Product_ID
-ORDER BY Low_Inventory_Days DESC;
+ORDER BY Risk_Ratio DESC;
+
