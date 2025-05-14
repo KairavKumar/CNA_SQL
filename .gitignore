@@ -1,0 +1,10 @@
+*.sql.gz
+*.dump
+*.backup
+*_backup.sql
+*.export.sql
+.DS_Store
+Thumbs.db
+.env
+.env.local
+
