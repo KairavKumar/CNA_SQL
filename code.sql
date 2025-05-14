@@ -296,3 +296,138 @@ FROM LabeledData
 GROUP BY Store_ID, Product_ID
 ORDER BY Risk_Ratio DESC;
 
+
+
+
+---SUMMARY REPORTS with some kpi's----------------------------------------------------------------------------------------------------------- 
+
+
+--1.INVENTORY AGE 
+--This measures how long inventory has been sitting in the store since last major replenishment.
+--Done by finding the date went last significant increase was seen in inventory.
+--Then calculate number of days that have passed since then, threshold to consider as significant increase is 20%( factor of 1.2),
+--
+WITH InventoryIncreases AS (
+  SELECT 
+    Store_ID,
+    Product_ID,
+    Date,
+    Inventory_Level,
+    LAG(Inventory_Level) OVER (PARTITION BY Store_ID, Product_ID ORDER BY Date) AS Prev_Inventory
+  FROM inventory_facts
+),
+ReplenishmentDates AS (
+  SELECT 
+    Store_ID,
+    Product_ID,
+    Date AS Replenished_On
+  FROM InventoryIncreases
+  WHERE Inventory_Level > Prev_Inventory * 1.2
+),
+LatestStock AS (
+  SELECT 
+    Store_ID,
+    Product_ID,
+    MAX(Date) AS Latest_Date
+  FROM inventory_facts
+  GROUP BY Store_ID, Product_ID
+),
+InventoryAge AS (
+  SELECT 
+    l.Store_ID,
+    l.Product_ID,
+    MAX(r.Replenished_On) AS Last_Replenishment_Date,
+    l.Latest_Date,
+    DATEDIFF(l.Latest_Date, MAX(r.Replenished_On)) AS Inventory_Age_Days
+  FROM LatestStock l
+  JOIN ReplenishmentDates r 
+    ON l.Store_ID = r.Store_ID 
+   AND l.Product_ID = r.Product_ID
+  WHERE r.Replenished_On <= l.Latest_Date
+  GROUP BY l.Store_ID, l.Product_ID, l.Latest_Date
+)
+SELECT 
+  Store_ID,
+  Product_ID,
+  DATE_FORMAT(Last_Replenishment_Date, '%Y-%m-%d') AS Last_Replenishment_Date,
+  DATE_FORMAT(Latest_Date, '%Y-%m-%d') AS Latest_Date,
+  Inventory_Age_Days
+FROM InventoryAge
+ORDER BY Inventory_Age_Days DESC;
+
+
+--2.STOCKOUT RATE---------------------------------------------------------------------
+----How often a product was out of stock in terms of % available days.
+SELECT 
+    Store_ID,
+    Product_ID,
+    COUNT(CASE WHEN Inventory_Level = 0 THEN 1 END) AS Stockout_Days,
+    COUNT(*) AS Total_Days,
+    ROUND(COUNT(CASE WHEN Inventory_Level = 0 THEN 1 END) / COUNT(*) * 100, 2) AS Stockout_Rate_Percent
+FROM inventory_facts
+GROUP BY Store_ID, Product_ID
+ORDER BY Stockout_Rate_Percent DESC;
+--we observe no product in any of the stores ever had a stockout on any given day.
+
+
+--3.SELL THROUGH RATE---------------------------------------------------------------
+--Measures how much stock was sold relative to total stock (sold + remaining).
+
+--a) sell through rates by region and  month based on weighted average inventory
+WITH DailyStats AS (
+    SELECT 
+        Region,
+        DATE(Date) AS Day,
+        DATE_FORMAT(Date, '%Y-%m') AS Month,
+        SUM(Units_Sold) AS Daily_Sales,
+        SUM(Inventory_Level) AS Daily_Inventory
+    FROM inventory_facts
+    GROUP BY Region, Day, Month
+),
+WeightedInventory AS (
+    SELECT 
+        Month,
+        Region,
+        ROUND(AVG(Daily_Inventory), 2) AS Weighted_Avg_Inventory,
+        SUM(Daily_Sales) AS Total_Units_Sold
+    FROM DailyStats
+    GROUP BY Region, Month
+)
+SELECT 
+    Month,
+    Region,
+    Total_Units_Sold,
+    Weighted_Avg_Inventory,
+    ROUND(
+        Total_Units_Sold / NULLIF(Total_Units_Sold + Weighted_Avg_Inventory, 0) * 100, 2
+    ) AS Sell_Through_Rate_Percent
+FROM WeightedInventory
+ORDER BY Month, Region;
+
+--b) sell through rates by stores and month
+SELECT 
+    DATE_FORMAT(Date, '%Y-%m') AS Month,
+    Region,
+    Store_ID,
+    SUM(Units_Sold) AS Total_Units_Sold,
+    MAX(Inventory_Level) AS Ending_Inventory,
+    ROUND(
+        SUM(Units_Sold) / NULLIF(SUM(Units_Sold) + MAX(Inventory_Level), 0) * 100, 2
+    ) AS Sell_Through_Rate_Percent
+FROM inventory_facts
+GROUP BY Month, Region, Store_ID
+ORDER BY Month, Region, Store_ID;
+
+
+--4.AVERAGE STOCK LEVEL-----------------------------------------------------------
+---average inventory level held over a period of one month grouped by region
+SELECT 
+    Region,
+    Category,
+    DATE_FORMAT(Date, '%Y-%m') AS YearMonth,
+    ROUND(AVG(Inventory_Level), 2) AS Avg_Stock_Level
+FROM inventory_facts
+GROUP BY Region, Category, YearMonth
+ORDER BY Region, Category, YearMonth;
+
+
