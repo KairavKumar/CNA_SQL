@@ -150,6 +150,78 @@ ORDER BY Region, Total_Stock DESC;
 
 -- Calculate reorder points with adjusted time scale -------------------------------------------------------------------------------------------------
 -- Assuming Units_Sold represents weekly sales as otherwise very non uniform answers are coming
+-- Calculate reorder points and identify low stock items
+-- Step 1: Get the latest date per Store + Product
+-- NO SEASONAL BIAS
+WITH LatestDatePerProduct AS (
+    SELECT Store_ID, Product_ID, MAX(Date) AS LatestDate
+    FROM inventory_facts
+    GROUP BY Store_ID, Product_ID
+),
+
+-- Step 2: Get latest sales and inventory snapshot per product-store
+LatestProductSales AS (
+    SELECT 
+        f.Store_ID,
+        f.Product_ID,
+        f.Category,
+        f.Region,
+        f.Units_Sold,
+        f.Inventory_Level,
+        f.Price
+    FROM inventory_facts f
+    JOIN LatestDatePerProduct l
+      ON f.Store_ID = l.Store_ID 
+     AND f.Product_ID = l.Product_ID 
+     AND f.Date = l.LatestDate
+),
+
+-- Step 3: Calculate average weekly sales and reorder point
+ProductSalesSummary AS (
+    SELECT 
+        f.Store_ID,
+        f.Product_ID,
+        f.Category,
+        f.Region,
+        ROUND(AVG(f.Units_Sold), 2) AS Avg_Weekly_Sales,
+        ROUND(STDDEV(f.Units_Sold), 2) AS StdDev_Sales,
+        MAX(l.Inventory_Level) AS Current_Stock,
+        MAX(l.Price) AS Unit_Price
+    FROM inventory_facts f
+    JOIN LatestProductSales l
+      ON f.Store_ID = l.Store_ID 
+     AND f.Product_ID = l.Product_ID
+    GROUP BY f.Store_ID, f.Product_ID, f.Category, f.Region
+)
+
+-- Step 4: Final output
+SELECT 
+    Store_ID,
+    Product_ID,
+    Category,
+    Region,
+    Current_Stock,
+    Avg_Weekly_Sales,
+    ROUND((Avg_Weekly_Sales + 1.5 * StdDev_Sales)) AS Reorder_Point,
+    CASE 
+        WHEN Current_Stock <= 0 THEN 'Out of Stock'
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * StdDev_Sales) THEN 'Below Reorder Point'
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * StdDev_Sales) * 1.2 THEN 'Near Reorder Point'
+        ELSE 'Adequate Stock'
+    END AS Stock_Status,
+    ROUND(Current_Stock / NULLIF(Avg_Weekly_Sales, 0), 1) AS Weeks_Of_Supply
+FROM ProductSalesSummary
+ORDER BY 
+    CASE 
+        WHEN Current_Stock <= 0 THEN 1
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * StdDev_Sales) THEN 2
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * StdDev_Sales) * 1.2 THEN 3
+        ELSE 4
+    END,
+    Weeks_Of_Supply;
+
+
+    -- SEASONALITY ADJUSTED REORDER POINTS
 WITH LatestDatePerProduct AS (
     SELECT Store_ID, Product_ID, MAX(Date) AS LatestDate
     FROM inventory_facts
@@ -233,7 +305,7 @@ ORDER BY
 
 ---------------------------------------------------------------------------------------------------------------
 -- inventory turnover ratio
--- This query calculates the inventory turnover ratio for each product in each store\
+-- This query calculates the inventory turnover ratio for each product in each store
 -- units based turn over ratio as cogs cannot be calculated
 SELECT 
     DATE_FORMAT(Date, '%Y-%m') AS YearMonth,
@@ -431,3 +503,15 @@ GROUP BY Region, Category, YearMonth
 ORDER BY Region, Category, YearMonth;
 
 
+-- 5. DEAD STOCK ANALYSIS--------------------------------------------------------------
+-- This query identifies products that have not sold for a certain number of days
+SELECT
+    Store_ID,
+    Product_ID,
+    COUNT(*) AS Total_Days,
+    SUM(CASE WHEN Units_Sold = 0 THEN 1 ELSE 0 END) AS Zero_Sales_Days,
+    ROUND(SUM(CASE WHEN Units_Sold = 0 THEN 1 ELSE 0 END) / COUNT(*) * 100, 2) AS Dead_Stock_Rate_Percent
+FROM inventory_facts
+GROUP BY Store_ID, Product_ID
+HAVING Dead_Stock_Rate_Percent > 0
+ORDER BY Dead_Stock_Rate_Percent DESC;
