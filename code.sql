@@ -387,7 +387,7 @@ WITH InventoryIncreases AS (
     Inventory_Level,
     LAG(Inventory_Level) OVER (PARTITION BY Store_ID, Product_ID ORDER BY Date) AS Prev_Inventory
   FROM inventory_facts
-),
+), 
 ReplenishmentDates AS (
   SELECT 
     Store_ID,
