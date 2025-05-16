@@ -1,10 +1,9 @@
-# db_connection.py
 
 import pyodbc
 from dotenv import load_dotenv
 import os
 
-load_dotenv()  # Load variables from .env
+load_dotenv()  # to load variables from .env
 
 def get_connection():
     conn_str = (

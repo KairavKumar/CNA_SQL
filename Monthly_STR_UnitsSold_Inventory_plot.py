@@ -42,10 +42,11 @@ FROM WeightedInventory
 ORDER BY Month, Region;
 """
 
-# === Fetch and clean data ===
+# === Fetch Data from MySQL===
 df = pd.read_sql(query, conn)
 conn.close()
 
+# === Data Cleaning ===
 df['Region'] = df['Region'].astype(str).str.replace('\x00', '', regex=False).str.strip()
 df['Month'] = df['Month'].astype(str).str.replace('\x00', '', regex=False).str.strip()
 df['Month'] = pd.to_datetime(df['Month'], format='%Y-%m', errors='coerce')
@@ -81,19 +82,19 @@ lines_1, labels_1 = ax1.get_legend_handles_labels()
 lines_2, labels_2 = ax2.get_legend_handles_labels()
 all_lines = lines_1 + lines_2
 all_labels = labels_1 + labels_2
-
-# Place legend inside plot, centered horizontally and vertically ~0.5
 fig.legend(
     all_lines,
     all_labels,
     loc='center',
-    bbox_to_anchor=(0.5, 0.5),  # x=middle, y=middle of plot area
+    bbox_to_anchor=(0.5, 0.5), 
     ncol=4,
     fontsize=9,
     frameon=True,
-    framealpha=0.7  # translucent background for readability
+    framealpha=0.7  
 )
 
 plt.title("Sell-Through Rate vs Units Sold and Inventory by Region", fontsize=16)
 plt.tight_layout()
+
+# === Show Plot ===
 plt.show()

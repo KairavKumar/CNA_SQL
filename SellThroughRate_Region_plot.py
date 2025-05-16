@@ -67,7 +67,7 @@ sns.lineplot(
     palette='tab10'
 )
 
-# === Custom Y-Axis Scaling ===
+# === Y-Axis Scaling ===
 y_min = max(0, df["Sell_Through_Rate_Percent"].min() - 5)
 y_max = df["Sell_Through_Rate_Percent"].max() + 5
 range_span = y_max - y_min
@@ -76,7 +76,7 @@ plt.yticks(np.arange(y_min, y_max + 1, step))
 
 # === Axis Labels and Title ===
 plt.title('Monthly Sell-Through Rate (%) by Region', fontsize=16)
-plt.xlabel('Month', fontsize=12)
+plt.xlabel('Month(quarterly)', fontsize=12)
 plt.ylabel('Sell-Through Rate (%)', fontsize=12)
 plt.xticks(rotation=45, ha='right')
 plt.legend(title='Region')
