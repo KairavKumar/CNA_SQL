@@ -1,11 +1,45 @@
+# OS/System files
+.DS_Store
+Thumbs.db
+
+# Python artifacts
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Database dumps / exports
 *.sql.gz
 *.dump
 *.backup
 *_backup.sql
 *.export.sql
-.DS_Store
-Thumbs.db
+
+# Data files
+*.csv
+*.tsv
+*.log
+
+# Environment configs
 .env
 .env.local
+.env.*.local
+.envrc
+
+# VSCode and editor-specific
 .vscode/
-*.csv
+.idea/
+*.swp
+
+# Jupyter notebooks (optional, if you use any)
+.ipynb_checkpoints/
+
+# Mac Finder tags (optional)
+.Spotlight-V100
+.Trashes
