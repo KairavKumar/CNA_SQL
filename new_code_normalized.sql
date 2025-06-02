@@ -1,12 +1,11 @@
 -- Enhanced normalized schema for complete query support
-CREATE DATABASE IF NOT EXISTS cna_normalized;
-USE cna_normalized;
+CREATE DATABASE IF NOT EXISTS cna;
+USE cna;
 
 -- 1. STORES TABLE
 CREATE TABLE stores (
     store_id VARCHAR(10) PRIMARY KEY,
     region VARCHAR(50) NOT NULL,
-    store_name VARCHAR(100),
     INDEX idx_region (region)
 );
 
@@ -14,7 +13,6 @@ CREATE TABLE stores (
 CREATE TABLE products (
     product_id VARCHAR(10) PRIMARY KEY,
     category VARCHAR(50) NOT NULL,
-    product_name VARCHAR(100),
     base_price DECIMAL(10,2) NOT NULL,
     INDEX idx_category (category)
 );
@@ -107,6 +105,101 @@ CREATE TABLE inventory_raw_import (
 -- Run this in terminal first: mysql --local-infile=1 -u root -p
 -- Then in MySQL: SET GLOBAL local_infile=1;
 LOAD DATA LOCAL INFILE './retail_store_inventory.csv' INTO TABLE inventory_raw_import FIELDS TERMINATED BY ',' ignore 1 lines;
+
+-- Populate stores table
+INSERT IGNORE INTO stores (store_id, region)
+SELECT DISTINCT Store_ID, Region
+FROM inventory_raw_import
+WHERE Store_ID IS NOT NULL AND Region IS NOT NULL;
+
+-- Populate products table
+INSERT IGNORE INTO products (product_id, category,  base_price)
+SELECT Product_ID, Category, AVG(Price)
+FROM inventory_raw_import
+WHERE Product_ID IS NOT NULL AND Category IS NOT NULL
+GROUP BY Product_ID, Category;
+
+-- Populate weather conditions table
+INSERT IGNORE INTO weather_conditions (weather_condition)
+SELECT DISTINCT Weather_Condition
+FROM inventory_raw_import
+WHERE Weather_Condition IS NOT NULL AND Weather_Condition != '';
+
+-- Populate seasonality table
+INSERT IGNORE INTO seasonality (season_name)
+SELECT DISTINCT Seasonality
+FROM inventory_raw_import
+WHERE Seasonality IS NOT NULL AND Seasonality != '';
+
+-- Populate promotions table
+INSERT IGNORE INTO promotions (is_holiday_promotion, promotion_description)
+VALUES 
+(FALSE, 'No Promotion'),
+(TRUE, 'Holiday Promotion');
+
+-- Populate the main fact table (inventory_snapshots)
+INSERT INTO inventory_snapshots (
+    snapshot_date, store_id, product_id, inventory_level, units_sold, 
+    units_ordered, demand_forecast, current_price, discount_percentage,
+    competitor_pricing, weather_id, season_id, promotion_id
+)
+SELECT 
+    i.Date,
+    i.Store_ID,
+    i.Product_ID,
+    i.Inventory_Level,
+    i.Units_Sold,
+    i.Units_Ordered,
+    i.Demand_Forecast,
+    i.Price,
+    i.Discount,
+    i.Competitor_Pricing,
+    w.weather_id,
+    s.season_id,
+    CASE WHEN i.Holiday_Promotion = '1' THEN 2 ELSE 1 END as promotion_id
+FROM inventory_raw_import i
+LEFT JOIN weather_conditions w ON i.Weather_Condition = w.weather_condition
+LEFT JOIN seasonality s ON i.Seasonality = s.season_name
+WHERE i.Store_ID IS NOT NULL 
+  AND i.Product_ID IS NOT NULL 
+  AND i.Date IS NOT NULL;
+
+-- Populate price history table (for tracking price changes)
+INSERT INTO price_history (product_id, effective_date, price, discount_percentage)
+SELECT DISTINCT 
+    Product_ID,
+    Date,
+    Price,
+    Discount
+FROM inventory_raw_import
+WHERE Product_ID IS NOT NULL 
+  AND Date IS NOT NULL 
+  AND Price IS NOT NULL
+ORDER BY Product_ID, Date;
+
+
+-- Clean up raw import table after successful population
+DROP TABLE inventory_raw_import;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 -- Your query equivalent in normalized schema
 SELECT 
