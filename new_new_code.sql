@@ -521,3 +521,194 @@ JOIN products p ON ld.product_id = p.product_id
 GROUP BY s.store_id, r.region_name, p.category, ld.product_id
 ORDER BY risk_ratio DESC;
 
+---SUMMARY REPORTS with some kpi's----------------------------------------------------------------------------------------------------------- 
+
+
+--1.INVENTORY AGE 
+--This measures how long inventory has been sitting in the store since last major replenishment.
+--Done by finding the date went last significant increase was seen in inventory.
+--Then calculate number of days that have passed since then, threshold to consider as significant increase is 20%( factor of 1.2),
+WITH InventoryIncreases AS (
+  SELECT 
+    store_id,
+    product_id,
+    snapshot_date,
+    inventory_level,
+    LAG(inventory_level) 
+      OVER (PARTITION BY store_id, product_id 
+            ORDER BY snapshot_date) AS Prev_Inventory
+  FROM inventory_snapshots
+), 
+ReplenishmentDates AS (
+  SELECT 
+    store_id,
+    product_id,
+    snapshot_date AS Replenished_On
+  FROM InventoryIncreases
+  WHERE inventory_level > Prev_Inventory * 1.2
+),
+LatestStock AS (
+  SELECT 
+    store_id,
+    product_id,
+    MAX(snapshot_date) AS Latest_Date
+  FROM inventory_snapshots
+  GROUP BY store_id, product_id
+),
+InventoryAge AS (
+  SELECT 
+    l.store_id,
+    l.product_id,
+    MAX(r.Replenished_On) AS Last_Replenishment_Date,
+    l.Latest_Date,
+    DATEDIFF(l.Latest_Date, MAX(r.Replenished_On)) AS Inventory_Age_Days
+  FROM LatestStock l
+  JOIN ReplenishmentDates r 
+    ON l.store_id   = r.store_id 
+   AND l.product_id = r.product_id
+  WHERE r.Replenished_On <= l.Latest_Date
+  GROUP BY l.store_id, l.product_id, l.Latest_Date
+)
+SELECT 
+  store_id   AS Store_ID,
+  product_id AS Product_ID,
+  DATE_FORMAT(Last_Replenishment_Date, '%Y-%m-%d') AS Last_Replenishment_Date,
+  DATE_FORMAT(Latest_Date,              '%Y-%m-%d') AS Latest_Date,
+  Inventory_Age_Days
+FROM InventoryAge
+ORDER BY Inventory_Age_Days DESC;
+
+
+--2.STOCKOUT RATE---------------------------------------------------------------------
+----How often a product was out of stock in terms of % available days.
+-- Stockout Analysis with Store Region and Product Category
+-- 2. STOCKOUT RATE
+-- How often a product was out of stock, by store and category
+SELECT 
+    r.region_name AS Store_Region,
+    i.store_id AS Store_ID,
+    p.category AS Product_Category,
+    i.product_id AS Product_ID,
+    COUNT(CASE WHEN i.inventory_level = 0 THEN 1 END) AS Stockout_Days,
+    COUNT(*) AS Total_Days,
+    ROUND(COUNT(CASE WHEN i.inventory_level = 0 THEN 1 END) / COUNT(*) * 100, 2) AS Stockout_Rate_Percent,
+    CASE 
+        WHEN COUNT(CASE WHEN i.inventory_level = 0 THEN 1 END) / COUNT(*) >= 0.3 THEN 'High Risk'
+        WHEN COUNT(CASE WHEN i.inventory_level = 0 THEN 1 END) / COUNT(*) >= 0.1 THEN 'Moderate Risk'
+        WHEN COUNT(CASE WHEN i.inventory_level = 0 THEN 1 END) / COUNT(*) > 0 THEN 'Low Risk'
+        ELSE 'No Stockouts'
+    END AS Risk_Category
+FROM inventory_snapshots i
+JOIN products p ON i.product_id = p.product_id
+JOIN store_regions sr ON i.store_id = sr.store_id
+JOIN regions r ON sr.region_id = r.region_id
+GROUP BY r.region_name, i.store_id, p.category, i.product_id
+ORDER BY Stockout_Rate_Percent DESC;
+
+
+
+
+-- Note: This query calculates the stockout rate for each product in each store,
+-- grouped by store region and product category.
+--we observe no product in any of the stores ever had a stockout on any given day.
+
+
+--3.SELL THROUGH RATE---------------------------------------------------------------
+--a) Sell through rates by region and month based on weighted average inventory
+WITH DailyStats AS (
+    SELECT 
+        r.region_name                AS Region,
+        DATE(i.snapshot_date)        AS Day,
+        DATE_FORMAT(i.snapshot_date, '%Y-%m') AS Month,
+        SUM(i.units_sold)            AS Daily_Sales,
+        SUM(i.inventory_level)       AS Daily_Inventory
+    FROM inventory_snapshots i
+    JOIN store_regions sr ON i.store_id = sr.store_id
+    JOIN regions r ON sr.region_id = r.region_id
+    GROUP BY 
+        r.region_name, 
+        DATE(i.snapshot_date), 
+        DATE_FORMAT(i.snapshot_date, '%Y-%m')
+),
+WeightedInventory AS (
+    SELECT 
+        Month,
+        Region,
+        ROUND(AVG(Daily_Inventory), 2) AS Weighted_Avg_Inventory,
+        SUM(Daily_Sales)       AS Total_Units_Sold
+    FROM DailyStats
+    GROUP BY Region, Month
+)
+SELECT 
+    Month,
+    Region,
+    Total_Units_Sold,
+    Weighted_Avg_Inventory,
+    ROUND(
+      Total_Units_Sold 
+      / NULLIF(Total_Units_Sold + Weighted_Avg_Inventory, 0) 
+      * 100, 
+      2
+    ) AS Sell_Through_Rate_Percent
+FROM WeightedInventory
+ORDER BY Month, Region;
+
+--b) Sell through rates by stores and month
+SELECT 
+    DATE_FORMAT(i.snapshot_date, '%Y-%m') AS Month,
+    r.region_name AS Region,
+    i.store_id AS Store_ID,
+    SUM(i.units_sold) AS Total_Units_Sold,
+    MAX(i.inventory_level) AS Ending_Inventory,
+    ROUND(
+      SUM(i.units_sold) 
+      / NULLIF(SUM(i.units_sold) + MAX(i.inventory_level), 0) 
+      * 100, 
+      2
+    ) AS Sell_Through_Rate_Percent
+FROM inventory_snapshots i
+JOIN store_regions sr ON i.store_id = sr.store_id
+JOIN regions r ON sr.region_id = r.region_id
+GROUP BY 
+    Month, 
+    Region, 
+    Store_ID
+ORDER BY Month, Region, Store_ID;
+
+--4.AVERAGE STOCK LEVEL-----------------------------------------------------------
+SELECT 
+    r.region_name AS Region,
+    p.category AS Category,
+    DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
+    ROUND(AVG(i.inventory_level), 2) AS Avg_Stock_Level
+FROM inventory_snapshots i
+JOIN store_regions sr ON i.store_id = sr.store_id
+JOIN regions r ON sr.region_id = r.region_id
+JOIN products p ON i.product_id = p.product_id
+GROUP BY 
+    r.region_name, 
+    p.category, 
+    YearMonth
+ORDER BY Region, Category, YearMonth;
+
+--5. DEAD STOCK ANALYSIS--------------------------------------------------------------
+SELECT
+    i.store_id   AS Store_ID,
+    i.product_id AS Product_ID,
+    COUNT(*)                          AS Total_Days,
+    SUM(CASE WHEN i.units_sold = 0 THEN 1 ELSE 0 END)   AS Zero_Sales_Days,
+    ROUND(
+      SUM(CASE WHEN i.units_sold = 0 THEN 1 ELSE 0 END) 
+      / COUNT(*) * 100, 
+      2
+    ) AS Dead_Stock_Rate_Percent
+FROM inventory_snapshots i
+GROUP BY i.store_id, i.product_id
+HAVING Dead_Stock_Rate_Percent > 0
+ORDER BY Dead_Stock_Rate_Percent DESC;
+
+
+
+
+
+

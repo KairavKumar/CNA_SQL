@@ -430,11 +430,11 @@ ORDER BY
 -- This query calculates the inventory turnover ratio for each product in each store
 -- units based turn over ratio as cogs cannot be calculated
 
-
 -- average turn over ratio by category (MONTHLY TURNOVER RATIO)
 -- Average Monthly Turnover Ratio by Product Category
 -- Using your working monthly turnover query as base
 -- Step 1: Compute monthly turnover per (store, product)
+
 WITH monthly_turnover AS (
     SELECT
         DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
