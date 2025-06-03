@@ -307,16 +307,72 @@ ORDER BY
 -- inventory turnover ratio
 -- This query calculates the inventory turnover ratio for each product in each store
 -- units based turn over ratio as cogs cannot be calculated
+
+
+-- average turn over ratio by category (MONTHLY TURNOVER RATIO)
+-- Average Monthly Turnover Ratio by Product Category
+-- Using your working monthly turnover query as base
+WITH monthly_turnover AS (
+    SELECT 
+        DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
+        i.store_id,
+        s.region,
+        i.product_id,
+        p.category,
+        SUM(i.units_sold) AS Total_Units_Sold,
+        AVG(i.inventory_level) AS Avg_Inventory_Level,
+        ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) AS Inventory_Turnover_Ratio
+    FROM inventory_snapshots i
+    JOIN stores s ON i.store_id = s.store_id
+    JOIN products p ON i.product_id = p.product_id
+    GROUP BY YearMonth, i.store_id, s.region, i.product_id, p.category
+    HAVING Inventory_Turnover_Ratio IS NOT NULL
+)
 SELECT 
-    DATE_FORMAT(Date, '%Y-%m') AS YearMonth,
-    Store_ID,
-    Product_ID,
-    SUM(Units_Sold) AS Total_Units_Sold,
-    AVG(Inventory_Level) AS Avg_Inventory_Level,
-    ROUND(SUM(Units_Sold) / NULLIF(AVG(Inventory_Level), 0), 2) AS Inventory_Turnover_Ratio
-FROM inventory_facts
-GROUP BY YearMonth, Store_ID, Product_ID
-ORDER BY YearMonth, Store_ID, Product_ID;
+    category,
+    COUNT(*) AS total_monthly_records,
+    ROUND(AVG(Inventory_Turnover_Ratio), 2) AS avg_monthly_turnover_ratio,
+    ROUND(MIN(Inventory_Turnover_Ratio), 2) AS min_turnover_ratio,
+    ROUND(MAX(Inventory_Turnover_Ratio), 2) AS max_turnover_ratio,
+    ROUND(STDDEV(Inventory_Turnover_Ratio), 2) AS turnover_stddev,
+    CASE 
+        WHEN AVG(Inventory_Turnover_Ratio) > 3 THEN 'High Turnover Category'
+        WHEN AVG(Inventory_Turnover_Ratio) > 1 THEN 'Moderate Turnover Category'
+        WHEN AVG(Inventory_Turnover_Ratio) > 0 THEN 'Low Turnover Category'
+        ELSE 'No Sales Category'
+    END AS category_performance
+FROM monthly_turnover
+GROUP BY category
+ORDER BY avg_monthly_turnover_ratio DESC;
+
+
+-- Inventory Turnover Ratio by Month, Store, and Product (MONTHLY TURNOVER RATIO)
+-- INVENTORY TURNOVER RATIO WITH NORMALIZED TABLES
+-- Includes store region and product category for better analysis
+SELECT 
+    DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
+    i.store_id,
+    s.region,
+    i.product_id,
+    p.category,
+    SUM(i.units_sold) AS Total_Units_Sold,
+    AVG(i.inventory_level) AS Avg_Inventory_Level,
+    ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) AS Inventory_Turnover_Ratio,
+    -- Additional insights
+    CASE 
+        WHEN ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) > 3 THEN 'High Turnover'
+        WHEN ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) > 1 THEN 'Moderate Turnover'
+        WHEN ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) > 0 THEN 'Low Turnover'
+        ELSE 'No Sales'
+    END AS Turnover_Category,
+    -- Days to sell inventory
+    ROUND(30 / NULLIF(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 0), 1) AS Days_To_Sell_Inventory
+FROM inventory_snapshots i
+JOIN stores s ON i.store_id = s.store_id
+JOIN products p ON i.product_id = p.product_id
+GROUP BY YearMonth, i.store_id, s.region, i.product_id, p.category
+ORDER BY YearMonth, s.region, i.store_id, p.category, i.product_id;
+
 
 
 

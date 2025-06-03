@@ -13,7 +13,7 @@ CREATE TABLE stores (
 CREATE TABLE products (
     product_id VARCHAR(10) PRIMARY KEY,
     category VARCHAR(50) NOT NULL,
-    base_price DECIMAL(10,2) NOT NULL,
+    base_price DECIMAL(10,2) NOT NULL, -- Base price the average price of the product across all stores
     INDEX idx_category (category)
 );
 
@@ -201,6 +201,8 @@ DROP TABLE inventory_raw_import;
 
 
 
+
+
 -- Your query equivalent in normalized schema
 SELECT 
     s.region,
@@ -220,43 +222,292 @@ WHERE (i.store_id, i.product_id, i.snapshot_date) IN (
 );
 
 
--- Seasonal reorder points equivalent
-WITH ProductSalesSummary AS (
+-- NON-SEASONAL REORDER POINTS 
+WITH LatestDatePerProduct AS (
+    SELECT store_id, product_id, MAX(snapshot_date) AS LatestDate
+    FROM inventory_snapshots
+    GROUP BY store_id, product_id
+),
+
+-- Get latest sales and inventory snapshot per product-store
+LatestProductSales AS (
+    SELECT 
+        i.store_id,
+        i.product_id,
+        p.category,
+        s.region,
+        i.units_sold,
+        i.inventory_level,
+        i.current_price
+    FROM inventory_snapshots i
+    JOIN LatestDatePerProduct l
+      ON i.store_id = l.store_id 
+     AND i.product_id = l.product_id 
+     AND i.snapshot_date = l.LatestDate
+    JOIN stores s ON i.store_id = s.store_id
+    JOIN products p ON i.product_id = p.product_id
+),
+
+-- Calculate average weekly sales and reorder point
+ProductSalesSummary AS (
+    SELECT 
+        i.store_id,
+        i.product_id,
+        p.category,
+        s.region,
+        ROUND(AVG(i.units_sold), 2) AS Avg_Weekly_Sales,
+        ROUND(STDDEV(i.units_sold), 2) AS StdDev_Sales,
+        MAX(l.inventory_level) AS Current_Stock,
+        MAX(l.current_price) AS Unit_Price
+    FROM inventory_snapshots i
+    JOIN LatestProductSales l
+      ON i.store_id = l.store_id 
+     AND i.product_id = l.product_id
+    JOIN stores s ON i.store_id = s.store_id
+    JOIN products p ON i.product_id = p.product_id
+    GROUP BY i.store_id, i.product_id, p.category, s.region
+)
+
+-- Final output
+SELECT 
+    store_id,
+    product_id,
+    category,
+    region,
+    Current_Stock,
+    Avg_Weekly_Sales,
+    ROUND((Avg_Weekly_Sales + 1.5 * COALESCE(StdDev_Sales, 0))) AS Reorder_Point,
+    CASE 
+        WHEN Current_Stock <= 0 THEN 'Out of Stock'
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * COALESCE(StdDev_Sales, 0)) THEN 'Below Reorder Point'
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * COALESCE(StdDev_Sales, 0)) * 1.2 THEN 'Near Reorder Point'
+        ELSE 'Adequate Stock'
+    END AS Stock_Status,
+    ROUND(Current_Stock / NULLIF(Avg_Weekly_Sales, 0), 1) AS Weeks_Of_Supply
+FROM ProductSalesSummary
+ORDER BY 
+    CASE 
+        WHEN Current_Stock <= 0 THEN 1
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * COALESCE(StdDev_Sales, 0)) THEN 2
+        WHEN Current_Stock < (Avg_Weekly_Sales + 1.5 * COALESCE(StdDev_Sales, 0)) * 1.2 THEN 3
+        ELSE 4
+    END,
+    Weeks_Of_Supply;
+
+-- SEASONALITY ADJUSTED REORDER POINTS 
+WITH LatestDatePerProduct AS (
+    SELECT store_id, product_id, MAX(snapshot_date) AS LatestDate
+    FROM inventory_snapshots
+    GROUP BY store_id, product_id
+),
+
+LatestProductSales AS (
     SELECT 
         i.store_id, 
         i.product_id, 
         p.category, 
         s.region,
-        ROUND(AVG(i.units_sold)/7, 2) AS Avg_Daily_Sales,
-        ROUND(STDDEV(i.units_sold)/7, 2) AS StdDev_Sales,
-        MAX(CASE WHEN i.snapshot_date = (
-            SELECT MAX(snapshot_date) 
-            FROM inventory_snapshots i2 
-            WHERE i2.store_id = i.store_id AND i2.product_id = i.product_id
-        ) THEN i.inventory_level END) AS Current_Stock
+        i.units_sold, 
+        i.inventory_level, 
+        i.current_price,
+        se.season_name AS seasonality
     FROM inventory_snapshots i
-    JOIN products p ON i.product_id = p.product_id
+    JOIN LatestDatePerProduct l
+      ON i.store_id = l.store_id 
+     AND i.product_id = l.product_id 
+     AND i.snapshot_date = l.LatestDate
     JOIN stores s ON i.store_id = s.store_id
-    GROUP BY i.store_id, i.product_id, p.category, s.region
-)
--- Rest of your seasonal calculation logic works the same
+    JOIN products p ON i.product_id = p.product_id
+    LEFT JOIN seasonality se ON i.season_id = se.season_id
+),
 
+ProductSalesSummary AS (
+    SELECT 
+        i.store_id, 
+        i.product_id, 
+        p.category, 
+        s.region,
+        ROUND(AVG(i.units_sold)/7, 2) AS Avg_Daily_Sales, 
+        ROUND(STDDEV(i.units_sold)/7, 2) AS StdDev_Sales,
+        MAX(l.inventory_level) AS Current_Stock,
+        MAX(l.current_price) AS Unit_Price,
+        MAX(l.seasonality) AS Current_Season
+    FROM inventory_snapshots i
+    JOIN LatestProductSales l
+      ON i.store_id = l.store_id 
+     AND i.product_id = l.product_id
+    JOIN stores s ON i.store_id = s.store_id
+    JOIN products p ON i.product_id = p.product_id
+    GROUP BY i.store_id, i.product_id, p.category, s.region
+),
+
+SeasonalFactors AS (
+    SELECT 
+        i.product_id,
+        se.season_name AS seasonality,
+        AVG(i.units_sold) / (
+            SELECT AVG(i2.units_sold) 
+            FROM inventory_snapshots i2 
+            WHERE i2.product_id = i.product_id
+        ) AS Seasonal_Factor
+    FROM inventory_snapshots i
+    LEFT JOIN seasonality se ON i.season_id = se.season_id
+    WHERE se.season_name IS NOT NULL
+    GROUP BY i.product_id, se.season_name
+)
+
+SELECT 
+    p.store_id,
+    p.product_id,
+    p.category,
+    p.region,
+    p.Current_Stock,
+    p.Avg_Daily_Sales,
+    ROUND((7 * p.Avg_Daily_Sales) + (1.5 * COALESCE(p.StdDev_Sales, 0))) AS Standard_Reorder_Point,
+    ROUND(((7 * p.Avg_Daily_Sales) + (1.5 * COALESCE(p.StdDev_Sales, 0))) * 
+          COALESCE(s.Seasonal_Factor, 1)) AS Seasonal_Reorder_Point,
+    COALESCE(s.Seasonal_Factor, 1) AS Applied_Seasonal_Factor,
+    p.Current_Season,
+    CASE 
+        WHEN p.Current_Stock <= 0 THEN 'Out of Stock'
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * COALESCE(p.StdDev_Sales, 0))) * COALESCE(s.Seasonal_Factor, 1)) 
+            THEN 'Below Seasonal Reorder Point'
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * COALESCE(p.StdDev_Sales, 0))) * COALESCE(s.Seasonal_Factor, 1)) * 1.2 
+            THEN 'Near Seasonal Reorder Point'
+        ELSE 'Adequate Stock'
+    END AS Stock_Status,
+    ROUND(p.Current_Stock / NULLIF(p.Avg_Daily_Sales * COALESCE(s.Seasonal_Factor, 1), 0), 1) AS Days_Of_Supply
+FROM ProductSalesSummary p
+LEFT JOIN SeasonalFactors s ON p.product_id = s.product_id AND p.Current_Season = s.seasonality
+ORDER BY 
+    CASE 
+        WHEN p.Current_Stock <= 0 THEN 1
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * COALESCE(p.StdDev_Sales, 0))) * COALESCE(s.Seasonal_Factor, 1)) THEN 2
+        WHEN p.Current_Stock < (((7 * p.Avg_Daily_Sales) + (1.5 * COALESCE(p.StdDev_Sales, 0))) * COALESCE(s.Seasonal_Factor, 1)) * 1.2 THEN 3
+        ELSE 4
+    END,
+    Days_Of_Supply;
+
+
+-- inventory turnover ratio
+-- This query calculates the inventory turnover ratio for each product in each store
+-- units based turn over ratio as cogs cannot be calculated
+
+
+-- average turn over ratio by category (MONTHLY TURNOVER RATIO)
+-- Average Monthly Turnover Ratio by Product Category
+-- Using your working monthly turnover query as base
+WITH monthly_turnover AS (
+    SELECT 
+        DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
+        i.store_id,
+        s.region,
+        i.product_id,
+        p.category,
+        SUM(i.units_sold) AS Total_Units_Sold,
+        AVG(i.inventory_level) AS Avg_Inventory_Level,
+        ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) AS Inventory_Turnover_Ratio
+    FROM inventory_snapshots i
+    JOIN stores s ON i.store_id = s.store_id
+    JOIN products p ON i.product_id = p.product_id
+    GROUP BY YearMonth, i.store_id, s.region, i.product_id, p.category
+    HAVING Inventory_Turnover_Ratio IS NOT NULL
+)
+SELECT 
+    category,
+    COUNT(*) AS total_monthly_records,
+    ROUND(AVG(Inventory_Turnover_Ratio), 2) AS avg_monthly_turnover_ratio,
+    ROUND(MIN(Inventory_Turnover_Ratio), 2) AS min_turnover_ratio,
+    ROUND(MAX(Inventory_Turnover_Ratio), 2) AS max_turnover_ratio,
+    ROUND(STDDEV(Inventory_Turnover_Ratio), 2) AS turnover_stddev,
+    CASE 
+        WHEN AVG(Inventory_Turnover_Ratio) > 3 THEN 'High Turnover Category'
+        WHEN AVG(Inventory_Turnover_Ratio) > 1 THEN 'Moderate Turnover Category'
+        WHEN AVG(Inventory_Turnover_Ratio) > 0 THEN 'Low Turnover Category'
+        ELSE 'No Sales Category'
+    END AS category_performance
+FROM monthly_turnover
+GROUP BY category
+ORDER BY avg_monthly_turnover_ratio DESC;
+
+
+-- Inventory Turnover Ratio by Month, Store, and Product (MONTHLY TURNOVER RATIO)
+-- INVENTORY TURNOVER RATIO WITH NORMALIZED TABLES
+-- Includes store region and product category for better analysis
 SELECT 
     DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
     i.store_id,
+    s.region,
     i.product_id,
+    p.category,
     SUM(i.units_sold) AS Total_Units_Sold,
     AVG(i.inventory_level) AS Avg_Inventory_Level,
-    ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) AS Inventory_Turnover_Ratio
+    ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) AS Inventory_Turnover_Ratio,
+    -- Additional insights
+    CASE 
+        WHEN ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) > 3 THEN 'High Turnover'
+        WHEN ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) > 1 THEN 'Moderate Turnover'
+        WHEN ROUND(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 2) > 0 THEN 'Low Turnover'
+        ELSE 'No Sales'
+    END AS Turnover_Category,
+    -- Days to sell inventory
+    ROUND(30 / NULLIF(SUM(i.units_sold) / NULLIF(AVG(i.inventory_level), 0), 0), 1) AS Days_To_Sell_Inventory
 FROM inventory_snapshots i
-GROUP BY YearMonth, i.store_id, i.product_id;
+JOIN stores s ON i.store_id = s.store_id
+JOIN products p ON i.product_id = p.product_id
+GROUP BY YearMonth, i.store_id, s.region, i.product_id, p.category
+ORDER BY YearMonth, s.region, i.store_id, p.category, i.product_id;
 
--- Your inventory age logic works with snapshot_date
-WITH InventoryIncreases AS (
+--  Stockout Risk Analysis (Days with Low or Zero Inventory)
+-- Stockout Risk Analysis (Days with Low or Zero Inventory) - NORMALIZED TABLES
+WITH ProductStats AS (
     SELECT 
-        store_id, product_id, snapshot_date, inventory_level,
-        LAG(inventory_level) OVER (PARTITION BY store_id, product_id ORDER BY snapshot_date) AS Prev_Inventory
+        store_id,
+        product_id,
+        ROUND(AVG(units_sold) / 7, 2) AS Avg_Daily_Sales,
+        ROUND(STDDEV(units_sold) / 7, 2) AS StdDev_Sales
     FROM inventory_snapshots
+    GROUP BY store_id, product_id
+),
+ReorderPoints AS (
+    SELECT 
+        store_id,
+        product_id,
+        ROUND((7 * Avg_Daily_Sales) + (1.5 * COALESCE(StdDev_Sales, 0)), 2) AS Reorder_Point
+    FROM ProductStats
+),
+LabeledData AS (
+    SELECT 
+        i.store_id,
+        i.product_id,
+        i.snapshot_date AS Date,
+        i.inventory_level,
+        rp.Reorder_Point,
+        CASE 
+            WHEN i.inventory_level <= rp.Reorder_Point THEN 1
+            ELSE 0
+        END AS Is_Low
+    FROM inventory_snapshots i
+    JOIN ReorderPoints rp 
+      ON i.store_id = rp.store_id AND i.product_id = rp.product_id
 )
--- Rest of your logic remains the same
+SELECT 
+    store_id AS Store_ID,
+    product_id AS Product_ID,
+    SUM(Is_Low) AS Low_Inventory_Days,
+    COUNT(*) AS Total_Days,
+    ROUND(SUM(Is_Low) / COUNT(*), 2) AS Risk_Ratio,
+    CASE 
+        WHEN ROUND(SUM(Is_Low) / COUNT(*), 2) >= 0.75 THEN 'High Risk'
+        WHEN ROUND(SUM(Is_Low) / COUNT(*), 2) >= 0.4 THEN 'Moderate Risk'
+        WHEN ROUND(SUM(Is_Low) / COUNT(*), 2) >= 0.2 THEN 'Low Risk'
+        ELSE 'Safe'
+    END AS Risk_Flag
+FROM LabeledData
+GROUP BY store_id, product_id
+ORDER BY Risk_Ratio DESC;
+
+
+
+
 
