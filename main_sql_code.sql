@@ -712,3 +712,200 @@ ORDER BY Dead_Stock_Rate_Percent DESC;
 
 
 
+-- =========================
+-- 3-Month Rolling Inventory Turnover & Stock Adjustment Recommendations (Days of Supply)
+-- =========================
+WITH WeeklySales AS (
+    SELECT
+        i.store_id,
+        i.product_id,
+        DATE_FORMAT(i.snapshot_date, '%Y-%u') AS week_number,
+        SUM(i.units_sold) AS weekly_sales
+    FROM inventory_snapshots i
+    GROUP BY i.store_id, i.product_id, week_number
+),
+ProductStats AS (
+    SELECT
+        ws.store_id,
+        ws.product_id,
+        AVG(ws.weekly_sales) AS avg_weekly_sales,
+        STDDEV(ws.weekly_sales) AS stddev_weekly_sales
+    FROM WeeklySales ws
+    GROUP BY ws.store_id, ws.product_id
+),
+LatestStock AS (
+    SELECT
+        i.store_id,
+        i.product_id,
+        i.inventory_level AS current_stock,
+        i.snapshot_date
+    FROM inventory_snapshots i
+    INNER JOIN (
+        SELECT store_id, product_id, MAX(snapshot_date) AS latest_date
+        FROM inventory_snapshots
+        GROUP BY store_id, product_id
+    ) latest
+    ON i.store_id = latest.store_id
+    AND i.product_id = latest.product_id
+    AND i.snapshot_date = latest.latest_date
+)
+SELECT
+    ls.store_id,
+    ls.product_id,
+    p.category,
+    ls.current_stock,
+    ps.avg_weekly_sales,
+    ROUND(ps.avg_weekly_sales + 1.5 * COALESCE(ps.stddev_weekly_sales, 0)) AS reorder_point,
+    CASE
+        WHEN ls.current_stock < (ps.avg_weekly_sales + 1.5 * COALESCE(ps.stddev_weekly_sales, 0))
+            THEN 'Order More'
+        WHEN ls.current_stock > 2 * (ps.avg_weekly_sales + 1.5 * COALESCE(ps.stddev_weekly_sales, 0))
+            THEN 'Reduce Stock'
+        ELSE 'Hold Steady'
+    END AS adjustment_recommendation,
+    ROUND(ls.current_stock / NULLIF(ps.avg_weekly_sales, 0), 1) AS weeks_of_supply
+FROM LatestStock ls
+JOIN ProductStats ps ON ls.store_id = ps.store_id AND ls.product_id = ps.product_id
+JOIN products p ON ls.product_id = p.product_id
+ORDER BY adjustment_recommendation, weeks_of_supply;
+-- =========================
+-- Supplier inconsistencies by store and product
+-- =========================
+
+WITH MaxDate AS (
+    SELECT MAX(snapshot_date) AS max_date FROM inventory_snapshots
+),
+RecentData AS (
+    SELECT
+        i.store_id,
+        i.product_id,
+        r.region_name AS region,
+        i.inventory_level,
+        i.units_sold,
+        i.units_ordered,
+        i.snapshot_date AS date
+    FROM inventory_snapshots i
+    JOIN store_regions sr ON i.store_id = sr.store_id
+    JOIN regions r ON sr.region_id = r.region_id
+    JOIN MaxDate m ON i.snapshot_date BETWEEN DATE_SUB(m.max_date, INTERVAL 3 MONTH) AND m.max_date
+),
+PerformanceSummary AS (
+    SELECT
+        store_id,
+        product_id,
+        region,
+        COUNT(*) AS days_tracked,
+        SUM(CASE WHEN inventory_level <= 80 THEN 1 ELSE 0 END) AS low_stock_days,
+        ROUND(SUM(CASE WHEN inventory_level <= 80 THEN 1 ELSE 0 END) / COUNT(*), 2) AS stockout_rate,
+        ROUND(STDDEV(units_ordered), 2) AS order_stddev,
+        ROUND(AVG(units_ordered), 2) AS avg_units_ordered,
+        ROUND(STDDEV(units_sold), 2) AS sales_stddev,
+        ROUND(AVG(units_sold), 2) AS avg_units_sold
+    FROM RecentData
+    GROUP BY store_id, product_id, region
+)
+SELECT
+    store_id,
+    product_id,
+    region,
+    days_tracked,
+    low_stock_days,
+    stockout_rate,
+    order_stddev,
+    avg_units_ordered,
+    sales_stddev,
+    avg_units_sold,
+    CASE
+        WHEN stockout_rate > 0.17 THEN 'Frequent Stockouts'
+        WHEN order_stddev > avg_units_ordered * 0.6 THEN 'Erratic Ordering'
+        WHEN sales_stddev > avg_units_sold * 0.9 THEN 'Erratic Fulfillment'
+        ELSE 'Consistent'
+    END AS inconsistency_flag
+FROM PerformanceSummary
+ORDER BY inconsistency_flag DESC, stockout_rate DESC, order_stddev DESC;
+
+
+-- =========================
+-- Seasonal/ Cylcic demand trends
+-- =========================
+
+WITH MonthlySales AS (
+    SELECT
+        store_id,
+        product_id,
+        YEAR(snapshot_date) AS Year,
+        MONTH(snapshot_date) AS Month,
+        SUM(units_sold) AS Total_Units_Sold
+    FROM inventory_snapshots
+    GROUP BY store_id, product_id, YEAR(snapshot_date), MONTH(snapshot_date)
+),
+
+Prev3MonthAvg AS (
+    SELECT
+        ms.store_id,
+        ms.product_id,
+        ms.Year,
+        ms.Month,
+        ms.Total_Units_Sold,
+        (
+            SELECT AVG(ms2.Total_Units_Sold)
+            FROM MonthlySales ms2
+            WHERE ms2.store_id = ms.store_id
+              AND ms2.product_id = ms.product_id
+              AND (
+                    (ms2.Year < ms.Year)
+                    OR (ms2.Year = ms.Year AND ms2.Month < ms.Month)
+                  )
+              AND STR_TO_DATE(CONCAT(ms2.Year, '-', LPAD(ms2.Month,2,'0'), '-01'), '%Y-%m-%d')
+                  >= DATE_SUB(STR_TO_DATE(CONCAT(ms.Year, '-', LPAD(ms.Month,2,'0'), '-01'), '%Y-%m-%d'), INTERVAL 3 MONTH)
+        ) AS Prev3Month_Avg
+    FROM MonthlySales ms
+),
+
+MonthTrend AS (
+    SELECT
+        store_id,
+        product_id,
+        Month,
+        Year,
+        Total_Units_Sold,
+        Prev3Month_Avg,
+        CASE
+            WHEN Prev3Month_Avg IS NULL THEN NULL
+            WHEN Total_Units_Sold > Prev3Month_Avg * 1.1 THEN 'Upward'
+            WHEN Total_Units_Sold < Prev3Month_Avg * 0.9 THEN 'Downward'
+            ELSE 'Stable'
+        END AS Trend
+    FROM Prev3MonthAvg
+),
+
+TrendSummary AS (
+    SELECT
+        store_id,
+        product_id,
+        Month,
+        COUNT(*) AS Years_Tracked,
+        SUM(CASE WHEN Trend = 'Upward' THEN 1 ELSE 0 END) AS Upward_Count,
+        SUM(CASE WHEN Trend = 'Downward' THEN 1 ELSE 0 END) AS Downward_Count,
+        SUM(CASE WHEN Trend = 'Stable' THEN 1 ELSE 0 END) AS Stable_Count
+    FROM MonthTrend
+    WHERE Trend IS NOT NULL
+    GROUP BY store_id, product_id, Month
+)
+
+SELECT
+    store_id AS Store_ID,
+    product_id AS Product_ID,
+    Month,
+    Years_Tracked,
+    Upward_Count,
+    Downward_Count,
+    Stable_Count,
+    CASE
+        WHEN Upward_Count > Downward_Count AND Upward_Count > Stable_Count THEN 'Mostly Upward'
+        WHEN Downward_Count > Upward_Count AND Downward_Count > Stable_Count THEN 'Mostly Downward'
+        WHEN Stable_Count > Upward_Count AND Stable_Count > Downward_Count THEN 'Mostly Stable'
+        ELSE 'Mixed'
+    END AS Avg_Trend
+FROM TrendSummary
+ORDER BY Store_ID, Product_ID, Month;
