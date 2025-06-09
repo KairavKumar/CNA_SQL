@@ -1,147 +1,129 @@
+# 📦 Inventory Inefficiencies Analytics – Urban Retail Co.
 
-Inventory Inefficiencies Analytics – Urban Retail Co.
-A SQL and Python-based solution to diagnose and optimize inventory management for Urban Retail Co. This project leverages MySQL for data processing and Matplotlib for visual analytics.
+**A SQL + Python solution to diagnose and optimize retail inventory management.**  
+*Powered by MySQL, Matplotlib & Python-ODBC*
 
-📦 Project Structure
-text
-/
-├── MatplotLib_code/           # Python scripts for data visualization
-├── Plots of Key Apis/         # Output plots and figures
-├── ps_relevant_pdfs/          # Reference PDFs (not included in repo)
-│   ├── Business Casebook - 2nd edition.pdf
-│   ├── Consulting Guide.pdf
-│   └── SQL_project.pdf
-├── venv/                      # Python virtual environment (not committed)
-├── .env.example               # Example environment variables
-├── .gitignore                 # Git ignore file
-├── analytics.sql              # Core SQL analytics queries
-├── code.sql                   # SQL schema and ETL scripts
-├── db_connection.py           # Python MySQL connection script
-├── README.md                  # Project documentation
-├── requirements.txt           # Python dependencies
-└── retail_store_inventory.csv # Main dataset
-🚀 Getting Started
-Prerequisites
-Python 3.8+
 
-MySQL Server
+## 🚀 Getting Started
 
-ODBC driver for MySQL
+### ✅ Prerequisites
 
-Installation
-Clone the repository:
+- Python 3.8+  
+- MySQL Server 8.0+  
+- ODBC driver for MySQL  
 
-bash
+### 🛠 Installation
+
+```bash
 git clone https://github.com/yourusername/inventory-inefficiencies-sql.git
 cd inventory-inefficiencies-sql
-Set up the Python environment:
-
-bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-Configure environment variables:
+cp .env.example .env            # edit .env with your MySQL creds 
+```
 
-Copy .env.example to .env and update with your MySQL credentials.
+# Retail Store Inventory Analysis 📊
 
-Import the dataset:
+## 🚀 Quick Start
 
-Load retail_store_inventory.csv into your MySQL database.
+### 1. **Import the dataset**
+Load `retail_store_inventory.csv` into your MySQL database.
 
-Run SQL scripts:
+### 2. **Create schema & ETL**
+```sql
+SOURCE code.sql;
+```
 
-Execute code.sql to set up schema and analytics.sql for analytics queries.
+### 3. **Run analytics queries**
+```sql
+SOURCE analytics.sql;
+```
 
-🏗️ Architecture
-Data Layer: MySQL database with normalized schema for inventory, sales, products, and suppliers.
+## 📂 Project Structure
 
-Analytics Layer: Advanced SQL scripts for KPI extraction, trend analysis, and reporting.
+```bash
+/
+├── MatplotLib_code/              # Python scripts for plots
+├── Plots of Key Apis/            # Output visuals
+├── ps_relevant_pdfs/             # Reference PDFs
+├── venv/                         # Python virtual environment
+├── .env.example                  # Sample env vars
+├── .gitignore
+├── analytics.sql                 # Analytics SQL queries
+├── code.sql                      # Schema & ETL scripts
+├── db_connection.py              # Python-MySQL connector
+├── requirements.txt
+├── retail_store_inventory.csv    # Main dataset
+├── ER_Diagram_3NF_normalized.pdf #Depiction of the relation between the tables
+└── README.md                     # This file
+```
 
-Visualization Layer: Python (Matplotlib) scripts to generate key analytics plots and dashboards.
+## 🏗️ Architecture
 
-Integration: Python-ODBC connects MySQL with analytics and visualization modules.
+* **Data Layer**: MySQL – normalized schema for products, suppliers, sales, inventory
+* **Analytics Layer**: Advanced SQL scripts for KPI extraction, trend analysis & reporting
+* **Visualization Layer**: Python + Matplotlib for dashboards and plots
+* **Integration**: Python-ODBC bridges MySQL and Python analytics
 
-✨ Features
-SQL Analytics:
+## ✨ Features
 
-Stock level calculations across stores/warehouses
+### SQL Analytics
+* Stock level calculations across stores & warehouses
+* Low-inventory detection & reorder alerts
+* Inventory turnover & aging analysis
+* KPI summaries: stockout rates, average stock levels
 
-Low inventory detection (reorder points)
+### Database Optimization
+* Fully normalized schema
+* Indexed joins, window functions & optimized queries
 
-Inventory turnover analysis
+### Analytical Outputs
+* Fast vs. slow-moving SKU identification
+* Stock adjustment recommendations
+* Supplier performance scoring
+* Seasonal demand forecasting
 
-KPI summary reports: stockout rates, inventory age, average stock levels
+### Visualizations
+* Matplotlib-based dashboards & plots
+* Outputs saved in `Plots of Key Apis/`
 
-Database Optimization:
+## 📝 Usage
 
-Normalized relational schema
-
-Indexing, optimized joins, and window functions
-
-Analytical Outputs:
-
-Fast vs. slow-moving product identification
-
-Stock adjustment recommendations
-
-Supplier performance analysis
-
-Demand forecasting using historical and seasonal trends
-
-Visualization:
-
-Matplotlib-based dashboards and plots for key metrics and trends
-
-📝 Usage
-Run analytics queries via MySQL Workbench or CLI:
-
-sql
--- Example: Get low inventory SKUs
+**Run analytics in MySQL CLI or Workbench**
+* Eg:
+```sql
 SELECT * FROM products WHERE units_in_stock < reorder_point;
-Generate plots:
+```
 
-bash
+**Generate plots**
+```bash
 python MatplotLib_code/inventory_turnover.py
-View dashboards:
+```
 
-Check the Plots of Key Apis/ folder for generated visualizations.
+**View dashboards**
+Open files in `Plots of Key Apis/`
 
-📊 Results & Insights
-Identified fast-moving SKUs at risk of stockout and slow-moving items tying up capital.
+## 📈 Results & Insights
 
-Recommended targeted stock adjustments to reduce holding costs and improve availability.
+* Identified SKUs at risk of stockout
+* Highlighted slow-moving items tying up capital
+* Flagged supplier inconsistencies
+* Forecasted demand spikes for proactive planning
 
-Highlighted supplier inconsistencies and their impact on inventory flow.
+## 🛠️ Dependencies
 
-Forecasted demand trends for proactive inventory planning.
+See `requirements.txt` for:
+* mysql-connector-python
+* matplotlib
+* pandas
+* python-dotenv
 
-🛠️ Dependencies
-Python packages: See requirements.txt (e.g., mysql-connector-python, matplotlib)
+## 🔮 Future Work
 
-MySQL Server 8.0+
+* Integrate real-time data pipelines & live dashboards
+* Expand to multi-channel (online/offline) data
+* Build interactive dashboards using Dash or Streamlit
+* Add machine-learning for advanced demand forecasting
 
-ODBC driver for MySQL
 
-🚧 Future Work
-Integrate real-time data pipelines for live dashboards
-
-Expand to multi-channel sales data (online/offline)
-
-Deploy interactive dashboards (e.g., using Dash or Streamlit)
-
-Incorporate machine learning for advanced demand forecasting
-
-🤝 Contributing
-Contributions are welcome! Please submit a pull request or open an issue for discussion.
-
-📄 License
-This project is licensed under the MIT License. See LICENSE for details.
-
-🙏 Acknowledgments
-Urban Retail Co. (simulated business case)
-
-Reference guides in ps_relevant_pdfs/
-
-Data sources and open-source community resources
-
-For questions or collaboration, contact [your-email@example.com].
