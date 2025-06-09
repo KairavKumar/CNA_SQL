@@ -1,7 +1,12 @@
 # 📦 Inventory Inefficiencies Analytics – Urban Retail Co.
 
+<<<<<<< HEAD
 **A SQL + Python solution to diagnose and optimize retail inventory management.**  
 *Powered by MySQL, Matplotlib & Python-ODBC*
+=======
+#Inventory Inefficiencies Analytics – Urban Retail Co.
+A SQL and Python-based solution to diagnose and optimize inventory management for Urban Retail Co. This project leverages MySQL for data processing and Matplotlib for visual analytics.
+>>>>>>> 385ea2bb3fedc3ab84b91cdf58fa99dda514ef41
 
 
 ## 🚀 Getting Started
@@ -127,3 +132,29 @@ See `requirements.txt` for:
 * Add machine-learning for advanced demand forecasting
 
 
+<<<<<<< HEAD
+=======
+🚧 Future Work
+Integrate real-time data pipelines for live dashboards
+
+Expand to multi-channel sales data (online/offline)
+
+Deploy interactive dashboards (e.g., using Dash or Streamlit)
+
+Incorporate machine learning for advanced demand forecasting
+
+🤝 Contributing
+Contributions are welcome! Please submit a pull request or open an issue for discussion.
+
+📄 License
+This project is licensed under the MIT License. See LICENSE for details.
+
+🙏 Acknowledgments
+Urban Retail Co. (simulated business case)
+
+Reference guides in ps_relevant_pdfs/
+
+Data sources and open-source community resources
+
+For questions or collaboration, contact [your-email@example.com].
+>>>>>>> 385ea2bb3fedc3ab84b91cdf58fa99dda514ef41
