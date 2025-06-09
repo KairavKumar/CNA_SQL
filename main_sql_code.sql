@@ -246,10 +246,10 @@ ORDER BY i.Product_ID, r.region_id, i.Date;
 DROP TABLE inventory_raw_import;
 
 -- ===========================================
--- UPDATED ANALYSIS QUERIES
+-- ANALYSIS QUERIES
 -- ===========================================
 
--- 1. CURRENT STOCK LEVELS (Updated to handle store-region relationships)
+-- 1. CURRENT STOCK LEVELS 
 SELECT 
     s.store_id,
     r.region_name,
@@ -269,7 +269,7 @@ WHERE (i.store_id, i.region_id, i.product_id, i.snapshot_date) IN (
 )
 ORDER BY s.store_id, r.region_name, p.category, i.product_id;
 
--- 2. REORDER POINTS ANALYSIS (Updated for store-region structure)
+-- 2. REORDER POINTS ANALYSIS 
 WITH 
 -- Get latest inventory status for each store-region-product combination
 LatestInventory AS (
@@ -345,7 +345,7 @@ ORDER BY
   END,
   s.store_id, r.region_name, l.product_id;
 
--- 3. SEASONAL REORDER POINTS (Updated for store-region structure)
+-- 3. SEASONAL REORDER POINTS 
 WITH
 -- Latest snapshot with current season
 LatestSnapshot AS (
@@ -440,7 +440,7 @@ ORDER BY
   END,
   s.store_id, r.region_name, days_of_supply;
 
--- 4. MONTHLY INVENTORY TURNOVER (Updated)
+-- 4. MONTHLY INVENTORY TURNOVER
 SELECT 
     DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
     s.store_id,
@@ -464,7 +464,7 @@ JOIN products p ON i.product_id = p.product_id
 GROUP BY YearMonth, s.store_id, r.region_name, i.product_id, p.category
 ORDER BY YearMonth, s.store_id, r.region_name, p.category, i.product_id;
 
--- 5. STOCKOUT RISK ANALYSIS (Updated)
+-- 5. STOCKOUT RISK ANALYSIS 
 WITH ProductStats AS (
     SELECT 
         store_id,
@@ -582,8 +582,7 @@ ORDER BY Inventory_Age_Days DESC;
 --2.STOCKOUT RATE---------------------------------------------------------------------
 ----How often a product was out of stock in terms of % available days.
 -- Stockout Analysis with Store Region and Product Category
--- 2. STOCKOUT RATE
--- How often a product was out of stock, by store and category
+
 SELECT 
     r.region_name AS Store_Region,
     i.store_id AS Store_ID,
@@ -610,7 +609,7 @@ ORDER BY Stockout_Rate_Percent DESC;
 
 -- Note: This query calculates the stockout rate for each product in each store,
 -- grouped by store region and product category.
---we observe no product in any of the stores ever had a stockout on any given day.
+-- we observe no product in any of the stores ever had a stockout on any given day.
 
 
 --3.SELL THROUGH RATE---------------------------------------------------------------
@@ -708,10 +707,6 @@ HAVING Dead_Stock_Rate_Percent > 0
 ORDER BY Dead_Stock_Rate_Percent DESC;
 
 
-
-
-
-
 -- =========================
 -- 3-Month Rolling Inventory Turnover & Stock Adjustment Recommendations (Days of Supply)
 -- =========================
@@ -768,6 +763,7 @@ FROM LatestStock ls
 JOIN ProductStats ps ON ls.store_id = ps.store_id AND ls.product_id = ps.product_id
 JOIN products p ON ls.product_id = p.product_id
 ORDER BY adjustment_recommendation, weeks_of_supply;
+
 -- =========================
 -- Supplier inconsistencies by store and product
 -- =========================
