@@ -31,7 +31,12 @@ cp .env.example .env            # edit .env with your MySQL creds
 ### 1. **Import the dataset**
 Load `retail_store_inventory.csv` into your MySQL database.
 
-### 2. **Create schema & ETL**
+    TERMINAL : 
+    mysql --local-infile=1 -u root -p
+    MYSQL    : 
+    SET GLOBAL local_infile=1;   
+
+### 2. **RUN CODE**
 ```sql
 SOURCE CODE.sql;
 ```
