@@ -36,7 +36,6 @@ Load `retail_store_inventory.csv` into your MySQL database.
 SOURCE CODE.sql;
 ```
 
-=
 
 ## 📂 Project Structure
 
