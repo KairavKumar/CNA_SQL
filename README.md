@@ -33,13 +33,10 @@ Load `retail_store_inventory.csv` into your MySQL database.
 
 ### 2. **Create schema & ETL**
 ```sql
-SOURCE code.sql;
+SOURCE CODE.sql;
 ```
 
-### 3. **Run analytics queries**
-```sql
-SOURCE analytics.sql;
-```
+=
 
 ## 📂 Project Structure
 
