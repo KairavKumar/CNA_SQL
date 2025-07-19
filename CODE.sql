@@ -1,4 +1,4 @@
--- Enhanced normalized schema handling multiple regions per store
+
 CREATE DATABASE IF NOT EXISTS cna;
 USE cna;
 
@@ -6,14 +6,12 @@ USE cna;
 CREATE TABLE stores (
     store_id VARCHAR(10) PRIMARY KEY,
     store_name VARCHAR(100),
-    INDEX idx_store_id (store_id)
 );
 
 -- 2. REGIONS TABLE 
 CREATE TABLE regions (
     region_id INT AUTO_INCREMENT PRIMARY KEY,
     region_name VARCHAR(50) UNIQUE NOT NULL,
-    INDEX idx_region_name (region_name)
 );
 
 -- 3. STORE_REGIONS TABLE (Many-to-Many relationship)
@@ -22,13 +20,11 @@ CREATE TABLE store_regions (
     store_region_id INT AUTO_INCREMENT PRIMARY KEY,
     store_id VARCHAR(10) NOT NULL,
     region_id INT NOT NULL,
-    is_primary_region BOOLEAN DEFAULT FALSE,
+    
     
     FOREIGN KEY (store_id) REFERENCES stores(store_id),
     FOREIGN KEY (region_id) REFERENCES regions(region_id),
     UNIQUE KEY unique_store_region (store_id, region_id),
-    INDEX idx_store_id (store_id),
-    INDEX idx_region_id (region_id)
 );
 
 -- 4. PRODUCTS TABLE
@@ -156,20 +152,14 @@ FROM inventory_raw_import
 WHERE Region IS NOT NULL AND Region != '';
 
 -- 3. Populate store_regions relationship table
-INSERT IGNORE INTO store_regions (store_id, region_id, is_primary_region)
+INSERT IGNORE INTO store_regions (store_id, region_id)
 SELECT DISTINCT 
     i.Store_ID,
-    r.region_id,
-    CASE 
-        WHEN ROW_NUMBER() OVER (PARTITION BY i.Store_ID ORDER BY COUNT(*) DESC) = 1 
-        THEN TRUE 
-        ELSE FALSE 
-    END as is_primary_region
+    r.region_id
 FROM inventory_raw_import i
 JOIN regions r ON i.Region = r.region_name
-WHERE i.Store_ID IS NOT NULL AND i.Region IS NOT NULL
-GROUP BY i.Store_ID, r.region_id, r.region_name
-ORDER BY i.Store_ID, COUNT(*) DESC;
+WHERE i.Store_ID IS NOT NULL AND i.Region IS NOT NULL;
+
 
 -- 4. Populate products table
 INSERT IGNORE INTO products (product_id, category, base_price)
@@ -302,7 +292,7 @@ DailySalesStats AS (
   FROM inventory_snapshots
   WHERE units_sold >= 0
   GROUP BY store_id, region_id, product_id
-  HAVING COUNT(*) >= 7  -- At least a week of data
+  HAVING COUNT(*) >= 7 
 )
 
 -- Final reorder point calculation
@@ -676,19 +666,26 @@ ORDER BY Month, Region, Store_ID;
 
 --4.AVERAGE STOCK LEVEL-----------------------------------------------------------
 SELECT 
-    r.region_name AS Region,
-    p.category AS Category,
+    s.store_id       AS Store,
+    s.store_name     AS StoreName,
+    p.category       AS Category,
     DATE_FORMAT(i.snapshot_date, '%Y-%m') AS YearMonth,
     ROUND(AVG(i.inventory_level), 2) AS Avg_Stock_Level
 FROM inventory_snapshots i
-JOIN store_regions sr ON i.store_id = sr.store_id
-JOIN regions r ON sr.region_id = r.region_id
-JOIN products p ON i.product_id = p.product_id
+JOIN stores s 
+  ON i.store_id = s.store_id
+JOIN products p 
+  ON i.product_id = p.product_id
 GROUP BY 
-    r.region_name, 
+    s.store_id, 
+    s.store_name,
     p.category, 
     YearMonth
-ORDER BY Region, Category, YearMonth;
+ORDER BY 
+    s.store_id, 
+    p.category, 
+    YearMonth;
+
 
 --5. DEAD STOCK ANALYSIS--------------------------------------------------------------
 SELECT
